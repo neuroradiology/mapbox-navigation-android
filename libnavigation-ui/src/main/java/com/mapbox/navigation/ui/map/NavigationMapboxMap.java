@@ -28,6 +28,7 @@ import com.mapbox.mapboxsdk.location.LocationComponent;
 import com.mapbox.mapboxsdk.location.LocationComponentActivationOptions;
 import com.mapbox.mapboxsdk.location.LocationComponentOptions;
 import com.mapbox.mapboxsdk.location.OnCameraTrackingChangedListener;
+import com.mapbox.mapboxsdk.location.OnIndicatorPositionChangedListener;
 import com.mapbox.mapboxsdk.location.modes.CameraMode;
 import com.mapbox.mapboxsdk.location.modes.RenderMode;
 import com.mapbox.mapboxsdk.maps.MapView;
@@ -227,6 +228,23 @@ public class NavigationMapboxMap implements LifecycleObserver {
     this.mapRoute = mapRoute;
     this.mapCamera = mapCamera;
     this.locationFpsDelegate = locationFpsDelegate;
+  }
+
+  @TestOnly
+  NavigationMapboxMap(@NonNull MapWayName mapWayName,
+                      @NonNull MapFpsDelegate mapFpsDelegate,
+                      NavigationMapRoute mapRoute,
+                      NavigationCamera mapCamera,
+                      LocationFpsDelegate locationFpsDelegate,
+                      LocationComponent locationComponent,
+                      boolean vanishRouteLineEnabled) {
+    this.mapWayName = mapWayName;
+    this.mapFpsDelegate = mapFpsDelegate;
+    this.mapRoute = mapRoute;
+    this.mapCamera = mapCamera;
+    this.locationFpsDelegate = locationFpsDelegate;
+    this.locationComponent = locationComponent;
+    this.vanishRouteLineEnabled = vanishRouteLineEnabled;
   }
 
   @TestOnly
@@ -435,21 +453,6 @@ public class NavigationMapboxMap implements LifecycleObserver {
   }
 
   /**
-   * Can be used to automatically drive the map camera, puck and route updates
-   * when {@link TripSessionState#STARTED}.
-   * <p>
-   * Use {@link #removeProgressChangeListener()} when the session is finished to avoid leaks.
-   *
-   * @param navigation to add the progress listeners
-   * @param enableVanishingRouteLine determines if the route line should vanish behind the puck.
-   * @see MapboxNavigation#startTripSession()
-   */
-  public void addProgressChangeListener(@NonNull MapboxNavigation navigation, boolean enableVanishingRouteLine) {
-    this.vanishRouteLineEnabled = enableVanishingRouteLine;
-    addProgressChangeListener(navigation);
-  }
-
-  /**
    * Removes the previously registered progress change listener.
    */
   public void removeProgressChangeListener() {
@@ -497,7 +500,6 @@ public class NavigationMapboxMap implements LifecycleObserver {
     settings.updateShouldUseDefaultPadding(mapPaddingAdjustor.isUsingDefault());
     settings.updateCameraTrackingMode(mapCamera.getCameraTrackingMode());
     settings.updateLocationFpsEnabled(locationFpsDelegate.isEnabled());
-    settings.updatePercentDistanceTraveled(mapRoute.getPercentDistanceTraveled());
     settings.updateVanishingRouteLineEnabled(vanishRouteLineEnabled);
     NavigationMapboxMapInstanceState instanceState = new NavigationMapboxMapInstanceState(settings);
     outState.putParcelable(STATE_BUNDLE_KEY, instanceState);
@@ -518,7 +520,6 @@ public class NavigationMapboxMap implements LifecycleObserver {
       NavigationMapboxMapInstanceState instanceState = (NavigationMapboxMapInstanceState) parcelable;
       settings = instanceState.retrieveSettings();
       restoreMapWith(settings);
-      restoreVanishingRouteLineSection(settings);
     } else {
       Timber.d("no instance state to restore");
     }
@@ -855,6 +856,28 @@ public class NavigationMapboxMap implements LifecycleObserver {
   }
 
   /**
+   * This will enable the feature to change the appearance of the route line behind the
+   * puck as it moves across the map.
+   */
+  public void enableVanishingRouteLine() {
+    if (!vanishRouteLineEnabled) {
+      vanishRouteLineEnabled = true;
+      addIndicatorPositionChangedListener();
+    }
+  }
+
+  /**
+   * This will disable the feature to change the appearance of the route line behind the
+   * puck as it moves across the map.
+   */
+  public void disableVanishingRouteLine() {
+    if (vanishRouteLineEnabled) {
+      vanishRouteLineEnabled = false;
+      locationComponent.removeOnIndicatorPositionChangedListener(indicatorPositionChangedListener);
+    }
+  }
+
+  /**
    * Called during the onStart event of the Lifecycle owner to initialize resources.
    */
   @OnLifecycleEvent(Lifecycle.Event.ON_START)
@@ -866,6 +889,10 @@ public class NavigationMapboxMap implements LifecycleObserver {
 
     if (navigation != null) {
       navigation.registerLocationObserver(locationObserver);
+    }
+
+    if (vanishRouteLineEnabled) {
+      addIndicatorPositionChangedListener();
     }
 
     if (navigationPuckPresenter != null) {
@@ -885,6 +912,10 @@ public class NavigationMapboxMap implements LifecycleObserver {
 
     if (navigation != null) {
       navigation.unregisterLocationObserver(locationObserver);
+    }
+
+    if (vanishRouteLineEnabled) {
+      locationComponent.removeOnIndicatorPositionChangedListener(indicatorPositionChangedListener);
     }
 
     if (navigationPuckPresenter != null) {
@@ -1026,14 +1057,6 @@ public class NavigationMapboxMap implements LifecycleObserver {
     mapWayName.updateWayNameWithPoint(mapPoint);
   }
 
-  private void restoreVanishingRouteLineSection(@NonNull NavigationMapSettings settings) {
-    float percentDistanceTraveled = settings.retrievePercentDistanceTraveled();
-    if (percentDistanceTraveled > 0) {
-      mapRoute.updateRouteLineWithDistanceTraveled(percentDistanceTraveled);
-      settings.updatePercentDistanceTraveled(0);
-    }
-  }
-
   private void restoreMapWith(@NonNull NavigationMapSettings settings) {
     updateCameraTrackingMode(settings.retrieveCameraTrackingMode());
     updateLocationFpsThrottleEnabled(settings.isLocationFpsEnabled());
@@ -1051,6 +1074,9 @@ public class NavigationMapboxMap implements LifecycleObserver {
     }
 
     vanishRouteLineEnabled = settings.retrieveVanishingRouteLineEnabled();
+    if (vanishRouteLineEnabled) {
+      addIndicatorPositionChangedListener();
+    }
   }
 
   private void handleWayNameOnStart() {
@@ -1100,4 +1126,14 @@ public class NavigationMapboxMap implements LifecycleObserver {
       }
     }
   };
+
+  private OnIndicatorPositionChangedListener indicatorPositionChangedListener = point -> {
+    mapRoute.updateTraveledRouteLine(point);
+  };
+
+  private void addIndicatorPositionChangedListener() {
+    // first make a call to remove the listener to prevent duplicates.
+    locationComponent.removeOnIndicatorPositionChangedListener(indicatorPositionChangedListener);
+    locationComponent.addOnIndicatorPositionChangedListener(indicatorPositionChangedListener);
+  }
 }

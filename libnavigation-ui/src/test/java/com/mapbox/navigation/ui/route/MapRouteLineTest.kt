@@ -26,6 +26,10 @@ import com.mapbox.navigation.ui.internal.route.RouteConstants.PRIMARY_ROUTE_LAYE
 import com.mapbox.navigation.ui.internal.route.RouteConstants.PRIMARY_ROUTE_TRAFFIC_LAYER_ID
 import com.mapbox.navigation.ui.internal.route.RouteConstants.WAYPOINT_LAYER_ID
 import com.mapbox.navigation.ui.internal.route.RouteLayerProvider
+import com.mapbox.navigation.ui.route.MapRouteLine.MapRouteLineSupport.findDistanceOfPointAlongLine
+import com.mapbox.navigation.ui.route.MapRouteLine.MapRouteLineSupport.getDistanceSum
+import com.mapbox.turf.TurfConstants
+import com.mapbox.turf.TurfMeasurement
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -77,11 +81,11 @@ class MapRouteLineTest {
             every { id } returns ALTERNATIVE_ROUTE_LAYER_ID
         }
 
-        primaryRouteCasingLayer = mockk {
+        primaryRouteCasingLayer = mockk(relaxUnitFun = true) {
             every { id } returns PRIMARY_ROUTE_CASING_LAYER_ID
         }
 
-        primaryRouteLayer = mockk {
+        primaryRouteLayer = mockk(relaxUnitFun = true) {
             every { id } returns PRIMARY_ROUTE_LAYER_ID
         }
 
@@ -89,15 +93,14 @@ class MapRouteLineTest {
             every { id } returns WAYPOINT_LAYER_ID
         }
 
-        primaryRouteTrafficLayer = mockk {
+        primaryRouteTrafficLayer = mockk(relaxUnitFun = true) {
             every { id } returns PRIMARY_ROUTE_TRAFFIC_LAYER_ID
         }
 
         style = mockk(relaxUnitFun = true) {
             every { getLayer(ALTERNATIVE_ROUTE_LAYER_ID) } returns alternativeRouteLayer
-            every {
-                getLayer(ALTERNATIVE_ROUTE_CASING_LAYER_ID)
-            } returns alternativeRouteCasingLayer
+            every { getLayer(ALTERNATIVE_ROUTE_CASING_LAYER_ID) } returns
+                alternativeRouteCasingLayer
             every { getLayer(PRIMARY_ROUTE_LAYER_ID) } returns primaryRouteLayer
             every { getLayer(PRIMARY_ROUTE_TRAFFIC_LAYER_ID) } returns primaryRouteTrafficLayer
             every { getLayer(PRIMARY_ROUTE_CASING_LAYER_ID) } returns primaryRouteCasingLayer
@@ -712,8 +715,8 @@ class MapRouteLineTest {
     fun buildRouteLineExpressionWhenNoTraffic() {
         every { style.layers } returns listOf(primaryRouteLayer)
         val expectedExpression =
-            "[\"step\", [\"line-progress\"], [\"rgba\", 0.0, 0.0, 0.0, 0.0], 0.2, " +
-                "[\"rgba\", 86.0, 168.0, 251.0, 1.0]]"
+            "[\"step\", [\"line-progress\"], [\"rgba\", 0.0, 0.0, 0.0, 0.0], 0.2, [\"rgba\", " +
+                "86.0, 168.0, 251.0, 1.0]]"
         val route = getDirectionsRoute(false)
         val mapRouteLine = MapRouteLine(
             ctx,
@@ -1094,9 +1097,8 @@ class MapRouteLineTest {
     @Test
     fun getExpressionAtOffsetWhenExpressionDataEmpty() {
         every { style.layers } returns listOf(primaryRouteLayer)
-        val expectedExpression = "[\"step\", [\"line-progress\"], [\"rgba\", 0.0, 0.0, 0.0, " +
-            "0.0], 0.2, [\"rgba\", 86.0, 168.0, 251.0, 1.0]]"
-        val route = getDirectionsRoute(true)
+        val expectedExpression = "[\"step\", [\"line-progress\"], [\"rgba\", 0.0, 0.0, 0.0, 0.0]," +
+            " 0.2, [\"rgba\", 86.0, 168.0, 251.0, 1.0]]"
         val mapRouteLine = MapRouteLine(
             ctx,
             style,
@@ -1117,6 +1119,168 @@ class MapRouteLineTest {
         assertEquals(expectedExpression, expression.toString())
     }
 
+    @Test
+    fun findDistanceOfPointAlongLine() {
+        val lineString = LineString.fromPolyline(
+            getDirectionsRoute().geometry()!!,
+            Constants.PRECISION_6
+        )
+        val points = lineString.coordinates()
+        val midPoint = TurfMeasurement.midpoint(points[4], points[5])
+        val expectedDist = 150.09775237499048
+
+        val result = findDistanceOfPointAlongLine(lineString, midPoint)
+
+        assertEquals(expectedDist, result, 0.001)
+    }
+
+    @Test
+    fun findDistanceOfPointAlongLineWhenReturningToBeginningOfLine() {
+        val lineString = "mjylgAjqguhF??bBmUfCa\\wXsGab@{JelAwXeFkBwXoH}DmAsFkA_@MaMyCuJgCc" +
+            "FmAa\\oHoJ]gC?ePfD_SzKiSfNuNzJiCzA}J`H_NpHuJdEoDvCoHrFgOlJijAto@qGtD{GfDcZdO_OpHgN" +
+            "pHaHtD_EuEViBaCuEpHeE????qHdE`CtEWhB~DtE`HuDfNqH~NqHbZeOzGgDpGuDhjAuo@fOmJnHsFnDwC" +
+            "tJeE~MqH|JaHhC{AtN{JhSgN~R{KdPgDfC?nJ\\`\\nHbFlAtJfC`MxC^LrFjA|DlAvXnHdFjBdlAvX`b@" +
+            "zJvXrG\\uE??"
+        val line = LineString.fromPolyline(lineString, Constants.PRECISION_6)
+        val point = TurfMeasurement.midpoint(line.coordinates()[1], line.coordinates()[2])
+        for (index in 0 until 50) {
+            val midPoint = TurfMeasurement.midpoint(
+                line.coordinates()[index],
+                line.coordinates()[index + 1]
+            )
+            findDistanceOfPointAlongLine(line, midPoint)
+        }
+
+        val result = findDistanceOfPointAlongLine(line, point)
+
+        assertEquals(15.982317678547622, result, 0.001)
+    }
+
+    @Test
+    fun findDistanceOfPointAlongLineWhenReturningToBeginningOfLine2() {
+        val lineString = "mjylgAjqguhF??bBmUfCa\\wXsGab@{JelAwXeFkBwXoH}DmAsFkA_@MaMyCuJgCc" +
+            "FmAa\\oHoJ]gC?ePfD_SzKiSfNuNzJiCzA}J`H_NpHuJdEoDvCoHrFgOlJijAto@qGtD{GfDcZdO_OpHgN" +
+            "pHaHtD_EuEViBaCuEpHeE????qHdE`CtEWhB~DtE`HuDfNqH~NqHbZeOzGgDpGuDhjAuo@fOmJnHsFnDwC" +
+            "tJeE~MqH|JaHhC{AtN{JhSgN~R{KdPgDfC?nJ\\`\\nHbFlAtJfC`MxC^LrFjA|DlAvXnHdFjBdlAvX`b@" +
+            "zJvXrG\\uE??"
+        val line = LineString.fromPolyline(lineString, Constants.PRECISION_6)
+        val point = TurfMeasurement.midpoint(line.coordinates()[7], line.coordinates()[8])
+        for (index in 0 until 50) {
+            val midPoint = TurfMeasurement.midpoint(
+                line.coordinates()[index],
+                line.coordinates()[index + 1]
+            )
+            findDistanceOfPointAlongLine(line, midPoint)
+        }
+
+        val result = findDistanceOfPointAlongLine(line, point)
+
+        assertEquals(364.9330848489882, result, 0.001)
+    }
+
+    @Test
+    fun getDistanceSumTest() {
+        val lineString = "mjylgAjqguhF??bBmUfCa\\wXsGab@{JelAwXeFkBwXoH}DmAsFkA_@MaMyCuJgCc" +
+            "FmAa\\oHoJ]gC?ePfD_SzKiSfNuNzJiCzA}J`H_NpHuJdEoDvCoHrFgOlJijAto@qGtD{GfDcZdO_OpHgN" +
+            "pHaHtD_EuEViBaCuEpHeE????qHdE`CtEWhB~DtE`HuDfNqH~NqHbZeOzGgDpGuDhjAuo@fOmJnHsFnDwC" +
+            "tJeE~MqH|JaHhC{AtN{JhSgN~R{KdPgDfC?nJ\\`\\nHbFlAtJfC`MxC^LrFjA|DlAvXnHdFjBdlAvX`b@" +
+            "zJvXrG\\uE??"
+        val line = LineString.fromPolyline(lineString, Constants.PRECISION_6)
+        val expected = TurfMeasurement.length(line.coordinates(), TurfConstants.UNIT_METERS)
+
+        val result = getDistanceSum(line.coordinates())
+
+        assertEquals(expected, result, 0.0)
+    }
+
+    @Test
+    fun updateVanishingPoint() {
+        every { style.layers } returns listOf(primaryRouteLayer)
+        every { style.isFullyLoaded } returnsMany listOf(
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            true,
+            true,
+            true
+        )
+        every {
+            style.getLayerAs<LineLayer>("mapbox-navigation-route-casing-layer")
+        } returns primaryRouteCasingLayer
+        every { style.getLayer("mapbox-navigation-route-layer") } returns primaryRouteLayer
+        every {
+            style.getLayer("mapbox-navigation-route-traffic-layer")
+        } returns primaryRouteTrafficLayer
+        val route = getDirectionsRoute()
+        val coordinates = LineString.fromPolyline(
+            route.geometry()!!,
+            Constants.PRECISION_6
+        ).coordinates()
+        val inputPoint = TurfMeasurement.midpoint(coordinates[4], coordinates[5])
+        val mapRouteLine = MapRouteLine(
+            ctx,
+            style,
+            styleRes,
+            null,
+            layerProvider,
+            mapRouteSourceProvider,
+            null
+        ).also { it.draw(listOf(route)) }
+
+        mapRouteLine.updateTraveledRouteLine(inputPoint)
+
+        verify { primaryRouteCasingLayer.setProperties(any()) }
+        verify { primaryRouteLayer.setProperties(any()) }
+        verify { primaryRouteTrafficLayer.setProperties(any()) }
+    }
+
+    @Test
+    fun updateVanishingPointWhenPointDistanceBeyondThreshold() {
+        every { style.layers } returns listOf(primaryRouteLayer)
+        every { style.isFullyLoaded } returnsMany listOf(
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            true,
+            true,
+            true
+        )
+        every {
+            style.getLayerAs<LineLayer>("mapbox-navigation-route-casing-layer")
+        } returns primaryRouteCasingLayer
+        every { style.getLayer("mapbox-navigation-route-layer") } returns primaryRouteLayer
+        every {
+            style.getLayer("mapbox-navigation-route-traffic-layer")
+        } returns primaryRouteTrafficLayer
+        val route = getDirectionsRoute()
+        val inputPoint = Point.fromLngLat(-122.508527, 37.974846)
+        val mapRouteLine = MapRouteLine(
+            ctx,
+            style,
+            styleRes,
+            null,
+            layerProvider,
+            mapRouteSourceProvider,
+            null
+        ).also { it.draw(listOf(route)) }
+
+        mapRouteLine.updateTraveledRouteLine(inputPoint)
+
+        verify(exactly = 0) { primaryRouteCasingLayer.setProperties(any()) }
+        verify(exactly = 0) { primaryRouteLayer.setProperties(any()) }
+        verify(exactly = 0) { primaryRouteTrafficLayer.setProperties(any()) }
+    }
+
     private fun getDirectionsRoute(includeCongestion: Boolean): DirectionsRoute {
         val congestionValue = when (includeCongestion) {
             true -> "\"unknown\",\"heavy\",\"low\""
@@ -1126,6 +1290,14 @@ class MapRouteLineTest {
         val directionsRouteAsJson = loadJsonFixture("222.txt")
             ?.replace("tokenHere", tokenHere)
             ?.replace("congestion_value", congestionValue)
+
+        return DirectionsRoute.fromJson(directionsRouteAsJson)
+    }
+
+    private fun getDirectionsRoute(): DirectionsRoute {
+        val tokenHere = "someToken"
+        val directionsRouteAsJson = loadJsonFixture("vanish_point_test.txt")
+            ?.replace("tokenHere", tokenHere)
 
         return DirectionsRoute.fromJson(directionsRouteAsJson)
     }

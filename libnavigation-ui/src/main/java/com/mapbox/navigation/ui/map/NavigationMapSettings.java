@@ -80,24 +80,16 @@ class NavigationMapSettings implements Parcelable {
     this.locationFpsEnabled = locationFpsEnabled;
   }
 
-  void updatePercentDistanceTraveled(float distance) {
-    this.percentDistanceTraveled = distance;
-  }
-
-  float retrievePercentDistanceTraveled() {
-    return this.percentDistanceTraveled;
-  }
-
-  boolean isLocationFpsEnabled() {
-    return locationFpsEnabled;
-  }
-
-  void updateVanishingRouteLineEnabled(final boolean enabled) {
+  void updateVanishingRouteLineEnabled(boolean enabled) {
     this.vanishingRouteLineEnabled = enabled;
   }
 
   boolean retrieveVanishingRouteLineEnabled() {
     return this.vanishingRouteLineEnabled;
+  }
+
+  boolean isLocationFpsEnabled() {
+    return locationFpsEnabled;
   }
 
   private NavigationMapSettings(@NonNull Parcel in) {
