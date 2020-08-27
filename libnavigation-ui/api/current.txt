@@ -617,6 +617,17 @@ package com.mapbox.navigation.ui.route {
     method public String getPrimaryRouteTrafficLineLayerId();
   }
 
+  public final class RouteLineScaleValue {
+    ctor public RouteLineScaleValue(float scaleStop, float scaleMultiplier, float scale);
+    method public float component1();
+    method public float component2();
+    method public float component3();
+    method public com.mapbox.navigation.ui.route.RouteLineScaleValue copy(float scaleStop, float scaleMultiplier, float scale);
+    method public float getScale();
+    method public float getScaleMultiplier();
+    method public float getScaleStop();
+  }
+
   public final class RouteStyleDescriptor {
     ctor public RouteStyleDescriptor(String routeIdentifier, int lineColorResourceId, int lineShieldColorResourceId);
     method public String component1();

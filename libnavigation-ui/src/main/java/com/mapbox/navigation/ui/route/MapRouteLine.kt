@@ -45,12 +45,12 @@ import com.mapbox.navigation.ui.route.MapRouteLine.MapRouteLineSupport.calculate
 import com.mapbox.navigation.ui.route.MapRouteLine.MapRouteLineSupport.generateFeatureCollection
 import com.mapbox.navigation.ui.route.MapRouteLine.MapRouteLineSupport.getBelowLayer
 import com.mapbox.navigation.ui.route.MapRouteLine.MapRouteLineSupport.getBooleanStyledValue
-import com.mapbox.navigation.ui.route.MapRouteLine.MapRouteLineSupport.getFloatStyledValue
 import com.mapbox.navigation.ui.route.MapRouteLine.MapRouteLineSupport.getResourceStyledValue
 import com.mapbox.navigation.ui.route.MapRouteLine.MapRouteLineSupport.getStyledColor
 import com.mapbox.navigation.utils.internal.ThreadController
 import com.mapbox.navigation.utils.internal.parallelMap
 import com.mapbox.turf.TurfMeasurement
+import timber.log.Timber
 import java.math.BigDecimal
 
 /**
@@ -217,24 +217,6 @@ internal class MapRouteLine(
         )
     }
 
-    private val routeScale: Float by lazy {
-        getFloatStyledValue(
-            R.styleable.MapboxStyleNavigationMapRoute_routeScale,
-            1.0f,
-            context,
-            styleRes
-        )
-    }
-
-    private val routeTrafficScale: Float by lazy {
-        getFloatStyledValue(
-            R.styleable.MapboxStyleNavigationMapRoute_routeTrafficScale,
-            1.0f,
-            context,
-            styleRes
-        )
-    }
-
     private val roundedLineCap: Boolean by lazy {
         getBooleanStyledValue(
             R.styleable.MapboxStyleNavigationMapRoute_roundedLineCap,
@@ -302,15 +284,6 @@ internal class MapRouteLine(
         getStyledColor(
             R.styleable.MapboxStyleNavigationMapRoute_alternativeRouteCasingColor,
             R.color.mapbox_navigation_route_alternative_casing_color,
-            context,
-            styleRes
-        )
-    }
-
-    private val alternativeRouteScale: Float by lazy {
-        getFloatStyledValue(
-            R.styleable.MapboxStyleNavigationMapRoute_alternativeRouteScale,
-            1.0f,
             context,
             styleRes
         )
@@ -611,7 +584,6 @@ internal class MapRouteLine(
 
         layerProvider.initializeAlternativeRouteCasingLayer(
             style,
-            alternativeRouteScale,
             alternativeRouteCasingColor
         ).apply {
             MapUtils.addLayerToMap(
@@ -625,7 +597,6 @@ internal class MapRouteLine(
         layerProvider.initializeAlternativeRouteLayer(
             style,
             roundedLineCap,
-            alternativeRouteScale,
             alternativeRouteDefaultColor
         ).apply {
             MapUtils.addLayerToMap(
@@ -638,7 +609,6 @@ internal class MapRouteLine(
 
         layerProvider.initializePrimaryRouteCasingLayer(
             style,
-            routeScale,
             routeCasingColor
         ).apply {
             MapUtils.addLayerToMap(
@@ -652,7 +622,6 @@ internal class MapRouteLine(
         layerProvider.initializePrimaryRouteLayer(
             style,
             roundedLineCap,
-            routeScale,
             routeDefaultColor
         ).apply {
             MapUtils.addLayerToMap(
@@ -666,7 +635,6 @@ internal class MapRouteLine(
         layerProvider.initializePrimaryRouteTrafficLayer(
             style,
             roundedLineCap,
-            routeTrafficScale,
             routeDefaultColor
         ).apply {
             MapUtils.addLayerToMap(
@@ -910,6 +878,83 @@ internal class MapRouteLine(
     }
 
     internal object MapRouteLineSupport {
+
+        fun getRouteLineScalingValues(
+            styleRes: Int,
+            context: Context,
+            stopsResourceId: Int,
+            scaleMultiplierResourceId: Int,
+            scalesResourceId: Int,
+            attributes: IntArray
+        ): List<RouteLineScaleValue> {
+
+            val stopsArray = getStyledFloatArray(
+                stopsResourceId,
+                context,
+                styleRes,
+                attributes
+            )
+
+            val multiplierArray = getStyledFloatArray(
+                scaleMultiplierResourceId,
+                context,
+                styleRes,
+                attributes
+            )
+
+            val scalesArray = getStyledFloatArray(
+                scalesResourceId,
+                context,
+                styleRes,
+                attributes
+            )
+
+            return consolidateScalingArrays(stopsArray, multiplierArray, scalesArray)
+        }
+
+        private fun consolidateScalingArrays(
+            routeScaleStopsArray: List<Float>,
+            routeScaleMultiplierArray: List<Float>,
+            routeLineScalesArray: List<Float>
+        ): List<RouteLineScaleValue> {
+            val minCount = minOf(
+                routeScaleStopsArray.size,
+                routeScaleMultiplierArray.size,
+                routeLineScalesArray.size
+            )
+
+            val itemsToReturn = mutableListOf<RouteLineScaleValue>()
+            for (index in 0 until minCount) {
+                itemsToReturn.add(
+                    RouteLineScaleValue(
+                        routeScaleStopsArray[index],
+                        routeScaleMultiplierArray[index],
+                        routeLineScalesArray[index]
+                    )
+                )
+            }
+            return itemsToReturn
+        }
+
+        fun getStyledFloatArray(
+            arrayResourceId: Int,
+            context: Context,
+            styleRes: Int,
+            attributes: IntArray
+        ): List<Float> {
+            return try {
+                val typedArray = context.obtainStyledAttributes(styleRes, attributes)
+                val resourceId = typedArray.getResourceId(arrayResourceId, 0).also {
+                    typedArray.recycle()
+                }
+                context.resources.getStringArray(resourceId).mapNotNull {
+                    it?.toFloatOrNull()
+                }
+            } catch (ex: Exception) {
+                Timber.e(ex)
+                listOf()
+            }
+        }
 
         /**
          * Returns a resource value from the style or a default value
