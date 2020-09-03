@@ -29,6 +29,7 @@ import com.mapbox.navigation.base.internal.extensions.applyDefaultParams
 import com.mapbox.navigation.base.internal.extensions.coordinates
 import com.mapbox.navigation.base.trip.model.RouteLegProgress
 import com.mapbox.navigation.base.trip.model.RouteProgress
+import com.mapbox.navigation.base.trip.model.RouteProgressState
 import com.mapbox.navigation.core.MapboxNavigation
 import com.mapbox.navigation.core.arrival.ArrivalObserver
 import com.mapbox.navigation.core.directions.session.RoutesRequestCallback
@@ -50,6 +51,7 @@ import com.mapbox.navigation.ui.feedback.FeedbackBottomSheetListener
 import com.mapbox.navigation.ui.feedback.FeedbackItem
 import com.mapbox.navigation.ui.internal.utils.ViewUtils
 import com.mapbox.navigation.ui.map.NavigationMapboxMap
+import com.mapbox.navigation.ui.puck.PuckDrawableSupplier
 import kotlinx.android.synthetic.main.activity_feedback_button.*
 import java.lang.ref.WeakReference
 
@@ -155,6 +157,7 @@ class FeedbackButtonActivity :
         mapboxMap.setStyle(Style.MAPBOX_STREETS) {
             mapboxMap.moveCamera(CameraUpdateFactory.zoomTo(15.0))
             navigationMapboxMap = NavigationMapboxMap(mapView, mapboxMap, this, true)
+            navigationMapboxMap?.setPuckDrawableSupplier(CustomPuckDrawableSupplier())
 
             mapboxNavigation?.registerRouteProgressObserver(ReplayProgressObserver(mapboxReplayer))
             mapboxReplayer.pushRealLocation(this, 0.0)
@@ -364,6 +367,18 @@ class FeedbackButtonActivity :
 
     companion object {
         private const val FEEDBACK_ICON_IMAGE_ID = "marker-feedback"
+    }
+
+    class CustomPuckDrawableSupplier : PuckDrawableSupplier {
+        override fun getPuckDrawable(routeProgressState: RouteProgressState): Int =
+            when (routeProgressState) {
+                RouteProgressState.ROUTE_INVALID -> R.drawable.custom_puck_icon_uncertain_location
+                RouteProgressState.ROUTE_INITIALIZED -> R.drawable.custom_user_puck_icon
+                RouteProgressState.LOCATION_TRACKING -> R.drawable.custom_user_puck_icon
+                RouteProgressState.ROUTE_COMPLETE -> R.drawable.custom_puck_icon_uncertain_location
+                RouteProgressState.LOCATION_STALE -> R.drawable.custom_user_puck_icon
+                else -> R.drawable.custom_puck_icon_uncertain_location
+            }
     }
 }
 
