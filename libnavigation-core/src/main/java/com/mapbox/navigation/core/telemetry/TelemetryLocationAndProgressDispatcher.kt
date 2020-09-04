@@ -12,7 +12,6 @@ import com.mapbox.navigation.core.trip.session.LocationObserver
 import com.mapbox.navigation.core.trip.session.OffRouteObserver
 import com.mapbox.navigation.core.trip.session.RouteProgressObserver
 import com.mapbox.navigation.utils.internal.ThreadController
-import com.mapbox.navigation.utils.internal.Time
 import com.mapbox.navigation.utils.internal.monitorChannelWithException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -27,17 +26,12 @@ private typealias RouteProgressReference = (RouteProgress) -> Unit
 internal class TelemetryLocationAndProgressDispatcher(scope: CoroutineScope) :
     RouteProgressObserver, LocationObserver, RoutesObserver, OffRouteObserver {
     private var lastLocation: AtomicReference<Location?> = AtomicReference(null)
-    private var routeProgressWithTimestamp: AtomicReference<RouteProgressWithTimestamp> =
-        AtomicReference(
-            RouteProgressWithTimestamp(
-                0,
-                RouteProgress.Builder(DirectionsRoute.builder().build()).build()
-            )
-        )
+    private var routeProgressWithTimestamp: AtomicReference<RouteProgress> =
+        AtomicReference(RouteProgress.Builder(DirectionsRoute.builder().build()).build())
     private val channelOffRouteEvent = Channel<Boolean>(Channel.CONFLATED)
     private val channelNewRouteAvailable = Channel<DirectionsRoute>(Channel.CONFLATED)
     private val channelLocationReceived = Channel<Location>(Channel.CONFLATED)
-    private val channelOnRouteProgress = Channel<RouteProgressWithTimestamp>(Channel.CONFLATED)
+    private val channelOnRouteProgress = Channel<RouteProgress>(Channel.CONFLATED)
 
     private var jobControl: CoroutineScope = scope
     private var originalRoute = AtomicReference<DirectionsRoute?>(null)
@@ -212,9 +206,8 @@ internal class TelemetryLocationAndProgressDispatcher(scope: CoroutineScope) :
      * It forwards the route progress data to a listener and saves it to a local variable
      */
     private fun beforeArrival(routeProgress: RouteProgress) {
-        val data = RouteProgressWithTimestamp(Time.SystemImpl.millis(), routeProgress)
-        this.routeProgressWithTimestamp.set(data)
-        channelOnRouteProgress.offer(data)
+        this.routeProgressWithTimestamp.set(routeProgress)
+        channelOnRouteProgress.offer(routeProgress)
         if (routeProgress.currentState == RouteProgressState.ROUTE_COMPLETE) {
             routeProgressPredicate.set { progress -> afterArrival(progress) }
         }
@@ -229,20 +222,19 @@ internal class TelemetryLocationAndProgressDispatcher(scope: CoroutineScope) :
             priorState = routeProgress.currentState
             Log.d(TAG, "route progress state = ${routeProgress.currentState}")
         }
-        val data = RouteProgressWithTimestamp(Time.SystemImpl.millis(), routeProgress)
-        this.routeProgressWithTimestamp.set(data)
+        this.routeProgressWithTimestamp.set(routeProgress)
     }
 
     override fun onRouteProgressChanged(routeProgress: RouteProgress) {
         routeProgressPredicate.get()(routeProgress)
     }
 
-    fun getRouteProgressChannel(): ReceiveChannel<RouteProgressWithTimestamp> =
+    fun getRouteProgressChannel(): ReceiveChannel<RouteProgress> =
         channelOnRouteProgress
 
     fun getLastLocation(): Location? = lastLocation.get()
 
-    fun getRouteProgressWithTimestamp(): RouteProgressWithTimestamp =
+    fun getRouteProgress(): RouteProgress =
         routeProgressWithTimestamp.get()
 
     fun clearOriginalRoute() {
