@@ -20,7 +20,6 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.withContext
 import java.util.Collections
-import java.util.Date
 import java.util.concurrent.atomic.AtomicReference
 
 private typealias RouteProgressReference = (RouteProgress) -> Unit
@@ -36,18 +35,18 @@ internal class TelemetryLocationAndProgressDispatcher(scope: CoroutineScope) :
             )
         )
     private val channelOffRouteEvent = Channel<Boolean>(Channel.CONFLATED)
-    private val channelNewRouteAvailable = Channel<RouteAvailable>(Channel.CONFLATED)
+    private val channelNewRouteAvailable = Channel<DirectionsRoute>(Channel.CONFLATED)
     private val channelLocationReceived = Channel<Location>(Channel.CONFLATED)
-    private val channelOnRouteProgress =
-        Channel<RouteProgressWithTimestamp>(Channel.CONFLATED) // we want just the last notification
+    private val channelOnRouteProgress = Channel<RouteProgressWithTimestamp>(Channel.CONFLATED)
+
     private var jobControl: CoroutineScope = scope
-    private var originalRoute = AtomicReference<RouteAvailable?>(null)
+    private var originalRoute = AtomicReference<DirectionsRoute?>(null)
     private val locationBuffer = SynchronizedItemBuffer<Location>()
     private val locationEventBuffer =
         SynchronizedItemBuffer<ItemAccumulationEventDescriptor<Location>>()
     private val originalRoutePreInit = { routes: List<DirectionsRoute> ->
         if (originalRoute.get() == null) {
-            originalRoute.set(RouteAvailable(routes[0], Date()))
+            originalRoute.set(routes[0])
             originalRouteDelegate = originalRoutePostInit
         }
     }
@@ -68,6 +67,7 @@ internal class TelemetryLocationAndProgressDispatcher(scope: CoroutineScope) :
     /**
      * This class provides thread-safe access to a mutable list of locations
      */
+    // TODO replace with concurrent collection
     private class SynchronizedItemBuffer<T> {
         private val synchronizedCollection: MutableList<T> =
             Collections.synchronizedList(mutableListOf<T>())
@@ -193,7 +193,7 @@ internal class TelemetryLocationAndProgressDispatcher(scope: CoroutineScope) :
     /**
      * This channel becomes signaled if a navigation route is selected
      */
-    fun getDirectionsRouteChannel(): ReceiveChannel<RouteAvailable> = channelNewRouteAvailable
+    fun getDirectionsRouteChannel(): ReceiveChannel<DirectionsRoute> = channelNewRouteAvailable
 
     fun getCopyOfCurrentLocationBuffer() = locationBuffer.getCopy()
 
@@ -282,7 +282,7 @@ internal class TelemetryLocationAndProgressDispatcher(scope: CoroutineScope) :
     override fun onRoutesChanged(routes: List<DirectionsRoute>) {
         Log.d(TAG, "onRoutesChanged received. Route list size = ${routes.size}")
         if (routes.isNotEmpty()) {
-            channelNewRouteAvailable.offer(RouteAvailable(routes[0], Date()))
+            channelNewRouteAvailable.offer(routes[0])
             originalRouteDelegate(routes)
             setOriginalRouteDeffered(routes)
         }

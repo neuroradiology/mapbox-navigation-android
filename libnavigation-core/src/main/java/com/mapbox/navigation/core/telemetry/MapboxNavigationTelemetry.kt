@@ -188,8 +188,7 @@ internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
             if (routes.isNotEmpty()) {
                 Log.d(TAG, "Getting last route from MapboxNavigation")
                 callbackDispatcher.clearOriginalRoute()
-                callbackDispatcher.getOriginalRouteReference()
-                    .set(RouteAvailable(routes[0], Date()))
+                callbackDispatcher.getOriginalRouteReference().set(routes[0])
             }
         }
     }
@@ -253,7 +252,7 @@ internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
             val newRoute = callbackDispatcher.getDirectionsRouteChannel()
                 .receive() // Suspend until we get a value
 
-            dynamicValues.distanceRemaining.set(newRoute.route.distance()?.toLong() ?: -1)
+            dynamicValues.distanceRemaining.set(newRoute.distance()?.toLong() ?: -1)
             dynamicValues.timeSinceLastReroute.set(
                 (Time.SystemImpl.millis() - dynamicValues.timeOfRerouteEvent.get()).toInt()
             )
@@ -264,9 +263,9 @@ internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
                 ) { preEventBuffer, postEventBuffer ->
                     // Populate the RerouteEvent
                     val rerouteEvent = RerouteEvent(populateSessionState()).apply {
-                        newDistanceRemaining = newRoute.route.distance()?.toInt() ?: -1
-                        newDurationRemaining = newRoute.route.duration()?.toInt() ?: -1
-                        newRouteGeometry = obtainGeometry(newRoute.route)
+                        newDistanceRemaining = newRoute.distance()?.toInt() ?: -1
+                        newDurationRemaining = newRoute.duration()?.toInt() ?: -1
+                        newRouteGeometry = obtainGeometry(newRoute)
                     }
 
                     // Populate and then send a NavigationRerouteEvent
@@ -693,13 +692,13 @@ internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
             eventDate = Date()
             eventRouteDistanceCompleted =
                 callbackDispatcher.getRouteProgressWithTimestamp().routeProgress.distanceTraveled.toDouble()
-            originalDirectionRoute = callbackDispatcher.getOriginalRoute()?.route
+            originalDirectionRoute = callbackDispatcher.getOriginalRoute()
             currentDirectionRoute =
                 callbackDispatcher.getRouteProgressWithTimestamp().routeProgress.route
             sessionIdentifier = dynamicValues.sessionId
             tripIdentifier = dynamicValues.tripIdentifier.get()
             originalRequestIdentifier =
-                callbackDispatcher.getOriginalRoute()?.route?.routeOptions()?.requestUuid()
+                callbackDispatcher.getOriginalRoute()?.routeOptions()?.requestUuid()
             requestIdentifier =
                 callbackDispatcher.getRouteProgressWithTimestamp().routeProgress.route.routeOptions()
                     ?.requestUuid()
@@ -738,7 +737,7 @@ internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
                 }
             }
 
-            callbackDispatcher.getOriginalRoute()?.route.let { originalRoute ->
+            callbackDispatcher.getOriginalRoute().let { originalRoute ->
                 originalStepCount = obtainStepCount(originalRoute)
                 originalEstimatedDistance = originalRoute?.distance()?.toInt() ?: 0
                 originalEstimatedDuration = originalRoute?.duration()?.toInt() ?: 0
