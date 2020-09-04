@@ -16,10 +16,9 @@ import com.mapbox.navigation.utils.internal.Time
 import com.mapbox.navigation.utils.internal.monitorChannelWithException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Collections
 import java.util.Date
 import java.util.concurrent.atomic.AtomicReference
@@ -29,7 +28,7 @@ private typealias RouteProgressReference = (RouteProgress) -> Unit
 internal class TelemetryLocationAndProgressDispatcher(scope: CoroutineScope) :
     RouteProgressObserver, LocationObserver, RoutesObserver, OffRouteObserver {
     private var lastLocation: AtomicReference<Location?> = AtomicReference(null)
-    private var routeProgress: AtomicReference<RouteProgressWithTimestamp> =
+    private var routeProgressWithTimestamp: AtomicReference<RouteProgressWithTimestamp> =
         AtomicReference(
             RouteProgressWithTimestamp(
                 0,
@@ -43,8 +42,7 @@ internal class TelemetryLocationAndProgressDispatcher(scope: CoroutineScope) :
         Channel<RouteProgressWithTimestamp>(Channel.CONFLATED) // we want just the last notification
     private var jobControl: CoroutineScope = scope
     private var originalRoute = AtomicReference<RouteAvailable?>(null)
-    private var accumulationJob: Job = Job()
-    private val currentLocationBuffer = SynchronizedItemBuffer<Location>()
+    private val locationBuffer = SynchronizedItemBuffer<Location>()
     private val locationEventBuffer =
         SynchronizedItemBuffer<ItemAccumulationEventDescriptor<Location>>()
     private val originalRoutePreInit = { routes: List<DirectionsRoute> ->
@@ -53,8 +51,8 @@ internal class TelemetryLocationAndProgressDispatcher(scope: CoroutineScope) :
             originalRouteDelegate = originalRoutePostInit
         }
     }
-    private val originalRouteDiffered = CompletableDeferred<DirectionsRoute>()
-    private var originalRouteDifferedValue: DirectionsRoute? = null
+    private val originalRouteDeffered = CompletableDeferred<DirectionsRoute>()
+    private var originalRouteDefferedValue: DirectionsRoute? = null
 
     private val originalRoutePostInit = { _: List<DirectionsRoute> -> Unit }
     private var originalRouteDelegate: (List<DirectionsRoute>) -> Unit = originalRoutePreInit
@@ -103,14 +101,23 @@ internal class TelemetryLocationAndProgressDispatcher(scope: CoroutineScope) :
             }
         }
 
-        fun applyToEach(predicate: (T) -> Boolean) {
+        fun applyToEachAndRemove(predicate: (T) -> Boolean) {
             synchronized(synchronizedCollection) {
                 val iterator = synchronizedCollection.iterator()
                 while (iterator.hasNext()) {
                     val nextItem = iterator.next()
-                    if (!predicate(nextItem)) {
+                    if (predicate(nextItem)) {
                         iterator.remove()
                     }
+                }
+            }
+        }
+
+        fun forEach(predicate: (T) -> Unit) {
+            synchronized(synchronizedCollection) {
+                val iterator = synchronizedCollection.iterator()
+                while (iterator.hasNext()) {
+                    predicate(iterator.next())
                 }
             }
         }
@@ -120,10 +127,10 @@ internal class TelemetryLocationAndProgressDispatcher(scope: CoroutineScope) :
 
     init {
         // Unconditionally update the contents of the pre-event buffer
-        accumulationJob = jobControl.monitorChannelWithException(
+        jobControl.monitorChannelWithException(
             channelLocationReceived,
             { location ->
-                accumulateLocationAsync(location, currentLocationBuffer)
+                accumulateLocation(location)
                 processLocationBuffer(location)
             }
         )
@@ -135,60 +142,40 @@ internal class TelemetryLocationAndProgressDispatcher(scope: CoroutineScope) :
      * size is equal to or greater than a given value.
      */
     private fun processLocationBuffer(location: Location) {
-        // Update each event buffer with a new location
-        locationEventBuffer.applyToEach { item ->
-            item.postEventBuffer.addFirst(location)
-            true
-        }
-        locationEventBuffer.applyToEach { item ->
-            when (item.postEventBuffer.size >= LOCATION_BUFFER_MAX_SIZE) {
-                true -> {
-                    item.onBufferFull(item.preEventBuffer, item.postEventBuffer)
-                    false
-                }
-                else -> {
-                    // Do nothing.
-                    true
-                }
+        locationEventBuffer.forEach { it.postEventBuffer.addFirst(location) }
+        locationEventBuffer.applyToEachAndRemove { item ->
+            if (item.postEventBuffer.size >= LOCATION_BUFFER_MAX_SIZE) {
+                item.onBufferFull(item.preEventBuffer, item.postEventBuffer)
+                true
+            } else {
+                // Do nothing.
+                false
             }
         }
     }
 
     fun flushBuffers() {
-        Log.d(TAG, "flushing buffers before ${currentLocationBuffer.size()}")
-        locationEventBuffer.applyToEach { item ->
-            item.onBufferFull(item.preEventBuffer, item.postEventBuffer)
-            false
-        }
+        Log.d(TAG, "flushing buffers before ${locationBuffer.size()}")
+        locationEventBuffer.forEach { it.onBufferFull(it.preEventBuffer, it.postEventBuffer) }
     }
 
     /**
      * This method accumulates locations. The number of locations is limited by [MapboxNavigationTelemetry.LOCATION_BUFFER_MAX_SIZE].
-     * Once this limit is reached, an item is removed before another is added. The method returns true if the queue reaches capacity,
-     * false otherwise
+     * Once this limit is reached, an item is removed before another is added.
      */
-    private fun accumulateLocationAsync(
-        location: Location,
-        queue: SynchronizedItemBuffer<Location>
-    ): Boolean {
-        var result = false
-        when (queue.size() >= LOCATION_BUFFER_MAX_SIZE) {
-            true -> {
-                queue.removeItem()
-                queue.addItem(location)
-                result = true
+    private fun accumulateLocation(location: Location) {
+        locationBuffer.run {
+            if (size() >= LOCATION_BUFFER_MAX_SIZE) {
+                removeItem()
             }
-            false -> {
-                queue.addItem(location)
-            }
+            addItem(location)
         }
-        return result
     }
 
     fun addLocationEventDescriptor(eventDescriptor: ItemAccumulationEventDescriptor<Location>) {
         eventDescriptor.preEventBuffer.clear()
         eventDescriptor.postEventBuffer.clear()
-        eventDescriptor.preEventBuffer.addAll(currentLocationBuffer.getCopy())
+        eventDescriptor.preEventBuffer.addAll(locationBuffer.getCopy())
         locationEventBuffer.addItem(eventDescriptor)
     }
 
@@ -196,8 +183,8 @@ internal class TelemetryLocationAndProgressDispatcher(scope: CoroutineScope) :
      * This method cancels all jobs that accumulate telemetry data. The side effect of this call is to call Telemetry.addEvent(), which may cause events to be sent
      * to the back-end server
      */
-    fun cancelCollectionAndPostFinalEvents(): Job {
-        return ThreadController.getIOScopeAndRootJob().scope.launch {
+    suspend fun cancelCollectionAndPostFinalEvents() {
+        withContext(ThreadController.IODispatcher) {
             flushBuffers()
             locationEventBuffer.clear()
         }
@@ -208,11 +195,11 @@ internal class TelemetryLocationAndProgressDispatcher(scope: CoroutineScope) :
      */
     fun getDirectionsRouteChannel(): ReceiveChannel<RouteAvailable> = channelNewRouteAvailable
 
-    fun getCopyOfCurrentLocationBuffer() = currentLocationBuffer.getCopy()
+    fun getCopyOfCurrentLocationBuffer() = locationBuffer.getCopy()
 
-    fun getOriginalRouteReadOnly() = originalRoute.get()
+    fun getOriginalRoute() = originalRoute.get()
 
-    fun getOriginalRouteReadWrite() = originalRoute
+    fun getOriginalRouteReference() = originalRoute
 
     fun resetRouteProgressProcessor() {
         routeProgressPredicate.set { routeProgress -> beforeArrival(routeProgress) }
@@ -226,7 +213,7 @@ internal class TelemetryLocationAndProgressDispatcher(scope: CoroutineScope) :
      */
     private fun beforeArrival(routeProgress: RouteProgress) {
         val data = RouteProgressWithTimestamp(Time.SystemImpl.millis(), routeProgress)
-        this.routeProgress.set(data)
+        this.routeProgressWithTimestamp.set(data)
         channelOnRouteProgress.offer(data)
         if (routeProgress.currentState == RouteProgressState.ROUTE_COMPLETE) {
             routeProgressPredicate.set { progress -> afterArrival(progress) }
@@ -238,16 +225,12 @@ internal class TelemetryLocationAndProgressDispatcher(scope: CoroutineScope) :
      * It stores the route progress data without notifying listeners.
      */
     private fun afterArrival(routeProgress: RouteProgress) {
-        when (routeProgress.currentState) {
-            priorState -> {
-            }
-            else -> {
-                priorState = routeProgress.currentState
-                Log.d(TAG, "route progress state = ${routeProgress.currentState}")
-            }
+        if (routeProgress.currentState != priorState) {
+            priorState = routeProgress.currentState
+            Log.d(TAG, "route progress state = ${routeProgress.currentState}")
         }
         val data = RouteProgressWithTimestamp(Time.SystemImpl.millis(), routeProgress)
-        this.routeProgress.set(data)
+        this.routeProgressWithTimestamp.set(data)
     }
 
     override fun onRouteProgressChanged(routeProgress: RouteProgress) {
@@ -259,11 +242,12 @@ internal class TelemetryLocationAndProgressDispatcher(scope: CoroutineScope) :
 
     fun getLastLocation(): Location? = lastLocation.get()
 
-    fun getRouteProgress(): RouteProgressWithTimestamp = routeProgress.get()
+    fun getRouteProgressWithTimestamp(): RouteProgressWithTimestamp =
+        routeProgressWithTimestamp.get()
 
     fun clearOriginalRoute() {
         originalRoute.set(null)
-        originalRouteDifferedValue = null
+        originalRouteDefferedValue = null
         originalRouteDelegate = originalRoutePreInit
     }
 
@@ -274,63 +258,33 @@ internal class TelemetryLocationAndProgressDispatcher(scope: CoroutineScope) :
     override fun onEnhancedLocationChanged(enhancedLocation: Location, keyPoints: List<Location>) {
         channelLocationReceived.offer(enhancedLocation)
         lastLocation.set(enhancedLocation)
-        when (firstLocationValue) {
-            null -> {
-                firstLocationValue = enhancedLocation
-                firstLocationValue?.let { location ->
-                    firstLocation.complete(location)
-                }
-            }
-            else -> {
-                firstLocationValue?.let { location ->
-                    firstLocation.complete(location)
-                }
-            }
+
+        if (firstLocationValue == null) {
+            firstLocationValue = enhancedLocation
         }
+        firstLocation.complete(firstLocationValue!!)
     }
 
     fun getFirstLocationAsync() = firstLocation
 
-    fun getOriginalRouteAsync() = originalRouteDiffered
+    fun getOriginalRouteAsync() = originalRouteDeffered
 
-    private fun notifyOfNewRoute(routes: List<DirectionsRoute>) {
-        when (originalRouteDifferedValue) {
-            null -> {
-                Log.d(TAG, "First time route set")
-                if (routes.isNotEmpty()) {
-                    originalRouteDifferedValue = routes[0]
-                    originalRouteDifferedValue?.let { route ->
-                        originalRouteDiffered.complete(route)
-                    }
-                } else {
-                    Log.d(TAG, "Empty route list received. Not setting route 2")
-                }
-            }
-            else -> {
-                if (routes.isNotEmpty()) {
-                    Log.d(TAG, "Subsequent route set")
-                    originalRouteDifferedValue?.let { route ->
-                        originalRouteDiffered.complete(route)
-                    }
-                } else {
-                    Log.d(TAG, "Empty route list received. Not setting route 2")
-                }
+    private fun setOriginalRouteDeffered(routes: List<DirectionsRoute>) {
+        Log.d(TAG, "Route list received. Size = ${routes.size}")
+        if (routes.isNotEmpty()) {
+            if (originalRouteDefferedValue == null) {
+                originalRouteDefferedValue = routes[0]
+                originalRouteDeffered.complete(originalRouteDefferedValue!!)
             }
         }
     }
 
     override fun onRoutesChanged(routes: List<DirectionsRoute>) {
-        when (routes.isEmpty()) {
-            true -> {
-                Log.d(TAG, "onRoutesChanged received an empty route list")
-            }
-            false -> {
-                Log.d(TAG, "onRoutesChanged received a valid route list")
-                val date = Date()
-                channelNewRouteAvailable.offer(RouteAvailable(routes[0], date))
-                originalRouteDelegate(routes)
-                notifyOfNewRoute(routes)
-            }
+        Log.d(TAG, "onRoutesChanged received. Route list size = ${routes.size}")
+        if (routes.isNotEmpty()) {
+            channelNewRouteAvailable.offer(RouteAvailable(routes[0], Date()))
+            originalRouteDelegate(routes)
+            setOriginalRouteDeffered(routes)
         }
     }
 
