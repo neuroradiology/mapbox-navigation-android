@@ -660,8 +660,7 @@ internal object MapboxNavigationTelemetry : MapboxNavigationTelemetryInterface {
     }
 
     private fun registerForNotification(mapboxNavigation: MapboxNavigation) {
-        callbackDispatcher =
-            TelemetryLocationAndProgressDispatcher(telemetryThreadControl.scope) // The class responds to most notification events
+        callbackDispatcher = TelemetryLocationAndProgressDispatcher() // The class responds to most notification events
         mapboxNavigation.registerRouteProgressObserver(callbackDispatcher)
         mapboxNavigation.registerLocationObserver(callbackDispatcher)
         mapboxNavigation.registerRoutesObserver(callbackDispatcher)
