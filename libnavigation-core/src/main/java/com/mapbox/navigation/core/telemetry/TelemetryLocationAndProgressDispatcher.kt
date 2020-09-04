@@ -21,9 +21,10 @@ import java.util.concurrent.atomic.AtomicReference
 
 internal class TelemetryLocationAndProgressDispatcher :
     RouteProgressObserver, LocationObserver, RoutesObserver, OffRouteObserver {
-    private var lastLocation: AtomicReference<Location?> = AtomicReference(null)
-    private var routeProgress: AtomicReference<RouteProgress> =
-        AtomicReference(RouteProgress.Builder(DirectionsRoute.builder().build()).build())
+    var lastLocation: Location? = null
+        private set
+    var routeProgress: RouteProgress? = null
+        private set
     private val channelOffRouteEvent = Channel<Boolean>(Channel.CONFLATED)
     private val channelDirectionsRoute = Channel<DirectionsRoute>(Channel.CONFLATED)
     private val channelRouteProgress = Channel<RouteProgress>(Channel.CONFLATED)
@@ -181,7 +182,7 @@ internal class TelemetryLocationAndProgressDispatcher :
 
     override fun onRouteProgressChanged(routeProgress: RouteProgress) {
         Log.d(TAG, "route progress state = ${routeProgress.currentState}")
-        this.routeProgress.set(routeProgress)
+        this.routeProgress = routeProgress
         if (!routeCompleted) {
             channelRouteProgress.offer(routeProgress)
             if (routeProgress.currentState == RouteProgressState.ROUTE_COMPLETE) {
@@ -193,10 +194,6 @@ internal class TelemetryLocationAndProgressDispatcher :
     fun getRouteProgressChannel(): ReceiveChannel<RouteProgress> =
         channelRouteProgress
 
-    fun getLastLocation(): Location? = lastLocation.get()
-
-    fun getRouteProgress(): RouteProgress =
-        routeProgress.get()
 
     fun clearOriginalRoute() {
         originalRoute.set(null)
@@ -210,7 +207,7 @@ internal class TelemetryLocationAndProgressDispatcher :
     override fun onEnhancedLocationChanged(enhancedLocation: Location, keyPoints: List<Location>) {
         accumulateLocation(enhancedLocation)
         processLocationBuffer(enhancedLocation)
-        lastLocation.set(enhancedLocation)
+        lastLocation = enhancedLocation
 
         if (!firstLocationDeffered.isCompleted) {
             firstLocationDeffered.complete(enhancedLocation)
